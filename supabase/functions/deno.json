@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "https://esm.sh/@supabase/supabase-js@2.45.0?target=deno": "https://esm.sh/@supabase/supabase-js@2.45.0?target=deno"
+  },
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noImplicitAny": false
+  },
+  "exclude": ["./_shared"]
+}

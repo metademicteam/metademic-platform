@@ -1,0 +1,38 @@
+# Supabase Edge Functions + Cron Configuration
+# Generated for Metademic Platform — automatic workflow
+# Deploy with: supabase functions deploy --no-verify-jwt (for public api) or supabase functions deploy workflow-engine --no-verify-jwt=false
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[functions.api]
+enabled = true
+verify_jwt = false
+import_map = "./functions/api/import_map.json"
+entrypoint = "./functions/api/index.ts"
+
+[functions.workflow-engine]
+enabled = true
+verify_jwt = true
+import_map = "./functions/workflow-engine/import_map.json"
+entrypoint = "./functions/workflow-engine/index.ts"
+
+[functions.notifications]
+enabled = true
+verify_jwt = true
+import_map = "./functions/notifications/import_map.json"
+entrypoint = "./functions/notifications/index.ts"
+
+[functions.cron-dispatcher]
+enabled = true
+verify_jwt = true
+import_map = "./functions/cron-dispatcher/import_map.json"
+entrypoint = "./functions/cron-dispatcher/index.ts"
+
+# Cron schedules are defined in SQL via pg_cron (see supabase/migrations/20260826_cron_jobs.sql)
+# Edge Functions are invoked via pg_net.http_post from pg_cron or via DB triggers via supabase_functions.http_request
+
