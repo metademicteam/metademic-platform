@@ -19,7 +19,7 @@ export async function sendEmail(params: {
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM ?? "Metademic <onboarding@resend.dev>";
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured — set it in Vercel/Netlify env and redeploy");
 
   // Dev convenience: Resend's test mode only delivers to the account owner's
   // email. When EMAIL_DEV_REDIRECT is set, route ALL mail there so you can

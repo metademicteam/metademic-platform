@@ -227,24 +227,55 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Notifications + audit
+  // Notifications + audit — notify ALL authors (not just submitted_by), with email to any manuscript_authors email
   try {
-    if (m.submitted_by) {
-      await admin.from("notifications").insert({ user_id: m.submitted_by, journal_id: m.journal_id, manuscript_id: manuscriptId, type: "article_published", title: "Article published", message: `"${m.title}" has been published as ${slug}.`, action_url: `/articles/${slug}` } as never);
-      // Real email via Resend job
-      const { data: profile } = await admin.from("profiles").select("email, first_name, last_name").eq("id", m.submitted_by).maybeSingle();
-      const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
-      if (p?.email) {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const doiStr = (doiInfo as { doi?: string } | null)?.doi ?? undefined;
+    const articleUrl = `${appUrl}/articles/${slug}`;
+    // notify all manuscript_authors that have a user_id
+    const authorUserIds = (authorsToInsert ?? []).map((a) => a.user_id).filter(Boolean) as string[];
+    const notifyTargets = Array.from(new Set([...(m.submitted_by ? [m.submitted_by] : []), ...authorUserIds]));
+    for (const uid of notifyTargets) {
+      try {
+        await admin.from("notifications").insert({ user_id: uid, journal_id: m.journal_id, manuscript_id: manuscriptId, type: "article_published", title: "Article published", message: `"${m.title}" has been published as ${slug}.`, action_url: `/articles/${slug}` } as never);
+      } catch {}
+    }
+    // email every manuscript_authors entry that has an email (covers corresponding + co-authors, even if profile missing)
+    const emailed = new Set<string>();
+    // First: emails from manuscript_authors rows (author list in DB)
+    for (const ma of (authorsToInsert ?? [])) {
+      const em = (ma.email as string | null)?.trim();
+      if (!em || emailed.has(em.toLowerCase())) continue;
+      emailed.add(em.toLowerCase());
+      const recipientName = [ma.first_name, ma.last_name].filter(Boolean).join(" ") || "Author";
+      try {
         await enqueueEmailJob(admin as never, {
           templateName: "article_published",
-          recipientEmail: p.email,
-          recipientUserId: m.submitted_by,
+          recipientEmail: em,
+          recipientUserId: ma.user_id ?? m.submitted_by ?? null,
           manuscriptId,
-          context: { recipientName: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Author", manuscriptTitle: m.title, articleTitle: m.title, doi: (doiInfo as { doi?: string } | null)?.doi ?? undefined, articleUrl: `${appUrl}/articles/${slug}` },
+          context: { recipientName, manuscriptTitle: m.title, articleTitle: m.title, doi: doiStr, articleUrl, manuscriptNumber: m.manuscript_number },
         });
-        await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: manuscriptId, recipient_email: p.email, template_name: "article_published", subject: `Your article has been published — ${m.title}`, status: "queued" } as never);
-      }
+        await admin.from("email_logs").insert({ user_id: ma.user_id ?? m.submitted_by ?? null, manuscript_id: manuscriptId, recipient_email: em, template_name: "article_published", subject: `Your article has been published — ${m.title}`, status: "queued" } as never);
+      } catch {}
+    }
+    // Also ensure submitted_by profile email gets it if not already covered by manuscript_authors list
+    if (m.submitted_by) {
+      try {
+        const { data: prof } = await admin.from("profiles").select("email, first_name, last_name").eq("id", m.submitted_by).maybeSingle();
+        const pe = (prof as { email: string | null } | null)?.email?.trim();
+        if (pe && !emailed.has(pe.toLowerCase())) {
+          const pn = [(prof as { first_name: string | null }).first_name, (prof as { last_name: string | null }).last_name].filter(Boolean).join(" ") || "Author";
+          await enqueueEmailJob(admin as never, {
+            templateName: "article_published",
+            recipientEmail: pe,
+            recipientUserId: m.submitted_by,
+            manuscriptId,
+            context: { recipientName: pn, manuscriptTitle: m.title, articleTitle: m.title, doi: doiStr, articleUrl, manuscriptNumber: m.manuscript_number },
+          });
+          await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: manuscriptId, recipient_email: pe, template_name: "article_published", subject: `Your article has been published — ${m.title}`, status: "queued" } as never);
+        }
+      } catch {}
     }
     await admin.from("audit_logs").insert({ actor_id: user.id, journal_id: m.journal_id, manuscript_id: manuscriptId, action: "article.published", entity_type: "article", entity_id: articleId, new_data: { slug, articleNumber, publication_status: setReadyOnly ? "draft" : "published" } } as never);
     await admin.from("system_jobs").insert({ job_type: "article_published", entity_type: "article", entity_id: articleId, status: "completed", payload: { manuscript_id: manuscriptId, slug } } as never);
