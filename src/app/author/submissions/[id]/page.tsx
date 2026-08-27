@@ -11,6 +11,7 @@ import { MANUSCRIPT_STATUS_LABELS, MANUSCRIPT_STATUS_COLORS, type ManuscriptStat
 import { FileText, Clock, User, Building2, Tag, ShieldCheck, Star, Ban, Download, History, AlertCircle, ArrowLeft, Send, Undo2, Pencil } from "lucide-react";
 import { ClientActions } from "./ClientActions";
 import { PayApcButton } from "@/components/author/PayApcButton";
+import { PaymentVerifyBanner } from "@/components/finance/PaymentVerifyBanner";
 
 function StatusBadge({ status }: { status: string }) {
   const s = status as ManuscriptStatus;
@@ -338,6 +339,9 @@ export default async function ManuscriptDetailPage({ params }: { params: Promise
             </CardContent>
           </Card>
 
+          {invoice && (
+            <PaymentVerifyBanner invoiceId={invoice.id} initialStatus={invoice.status} />
+          )}
           <Card id="apc">
             <CardHeader>
               <CardTitle className="text-sm">APC</CardTitle>

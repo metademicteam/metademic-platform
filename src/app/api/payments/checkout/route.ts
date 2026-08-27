@@ -29,7 +29,11 @@ export async function POST(req: NextRequest) {
   const currency = (inv.currency ?? "USD").toLowerCase();
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "")) ?? (() => {
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") ?? (host?.includes("localhost") ? "http" : "https");
+    return host ? `${proto}://${host}` : "http://localhost:3000";
+  })();
 
   // Create or reuse pending payment
   let providerPaymentId: string | null = null;
@@ -49,7 +53,7 @@ export async function POST(req: NextRequest) {
         mode: "payment",
         line_items: [{ price_data: { currency, product_data: { name: `Invoice ${inv.invoice_number}`, description: `Metademic APC payment` }, unit_amount: Math.round(amount * 100) }, quantity: 1 }],
         metadata: { invoice_id: invoiceId, apc_id: inv.apc_id },
-        success_url: `${appUrl}/finance/invoices/${invoiceId}?payment=success`,
+        success_url: `${appUrl}/finance/invoices/${invoiceId}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${appUrl}/finance/invoices/${invoiceId}?payment=cancelled`,
       });
       providerPaymentId = session.id;

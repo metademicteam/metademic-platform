@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from "@/components/ui/table";
 import { PaymentButton } from "@/components/finance/PaymentButton";
+import { PaymentVerifyBanner } from "@/components/finance/PaymentVerifyBanner";
 import { ApcCard } from "@/components/finance/ApcCard";
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +37,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         </div>
         <Link href="/finance/invoices" className="text-sm text-primary hover:underline">← All invoices</Link>
       </div>
+
+      <PaymentVerifyBanner invoiceId={inv.id} initialStatus={inv.status} />
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
@@ -102,3 +105,4 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     </div>
   );
 }
+
