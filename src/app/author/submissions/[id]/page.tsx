@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { reconcileInvoicesForManuscripts, reconcileInvoiceWithStripe } from "@/lib/payments/reconcile";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -76,6 +77,11 @@ export default async function ManuscriptDetailPage({ params }: { params: Promise
     const invoiceId = (apc as { id: string }).id;
     const { data } = await admin.from("invoices").select("id, invoice_number, status, amount, total_amount").eq("apc_id", invoiceId).limit(1).maybeSingle();
     invoice = (data as { id: string; invoice_number: string; status: string; amount: number; total_amount: number } | null) ?? null;
+  if (invoice && invoice.status !== "paid" && process.env.STRIPE_SECRET_KEY) {
+    try { const r = await reconcileInvoiceWithStripe(invoice.id); if (r.reconciled) { const { data: healed } = await admin.from("invoices").select("id, invoice_number, status, amount, total_amount").eq("id", invoice.id).single(); if (healed) invoice = healed as typeof invoice; } } catch {}
+  }
+  // Also heal via manuscript-level reconcile (covers case where invoice row missing but Stripe session exists)
+  try { if (process.env.STRIPE_SECRET_KEY) await reconcileInvoicesForManuscripts([id]); } catch {}
   }
 
   const canSubmit = m.status === "draft";

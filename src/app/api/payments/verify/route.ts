@@ -45,11 +45,20 @@ async function ensureArticleInProduction(
 }
 
 async function fulfillPaidInvoice(admin: ReturnType<typeof createAdminClient>, invoiceId: string, opts: { amount?: number; currency?: string; providerEventId?: string; providerPaymentId?: string | null }) {
+  const { error, data } = await admin.rpc("payment_succeeded" as never, {
+    p_invoice_id: invoiceId,
+    p_provider: "stripe",
+    p_provider_payment_id: opts.providerPaymentId ?? null,
+    p_provider_event_id: opts.providerEventId ?? `verify_${Date.now()}`,
+    p_amount: opts.amount ?? null,
+    p_currency: opts.currency ?? null,
+  } as never);
+  if (!error) return { ok: true as const, rpc: data as string };
+  // Fallback to legacy if RPC not yet deployed
   const { data: invoice } = await admin.from("invoices").select("id, apc_id, amount, currency, status").eq("id", invoiceId).single();
   if (!invoice) return { error: "Invoice not found" };
   const inv = invoice as { id: string; apc_id: string; amount: number; currency: string; status: string };
   if (inv.status === "paid") return { alreadyPaid: true as const };
-
   let paymentId: string | null = null;
   if (opts.providerPaymentId) {
     const { data: p } = await admin.from("payments").select("id").eq("provider_payment_id", opts.providerPaymentId).maybeSingle();

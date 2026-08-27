@@ -250,50 +250,61 @@ export async function POST(req: NextRequest) {
     paymentId = (p2 as { id: string } | null)?.id ?? null;
   }
 
-  if (paymentId) {
-    await admin.from("payments").update({ status: "succeeded", paid_at: new Date().toISOString(), provider_event_id: eventId, amount: amount || undefined, currency: currency || undefined } as never).eq("id", paymentId);
-  } else {
-    await admin.from("payments").insert({ invoice_id: invoiceId, provider: "stripe", provider_payment_id: sessionId ?? `pi_${Date.now()}`, provider_event_id: eventId, amount: amount, currency, status: "succeeded", paid_at: new Date().toISOString() } as never);
-  }
-  await admin.from("invoices").update({ status: "paid", paid_at: new Date().toISOString() } as never).eq("id", invoiceId);
-  const { data: apc } = await admin.from("apcs").select("manuscript_id").eq("id", inv.apc_id).single();
-  const mid = (apc as { manuscript_id: string } | null)?.manuscript_id;
-  if (mid) {
-    const { data: m } = await admin.from("manuscripts").select("status, journal_id, submitted_by").eq("id", mid).single();
-    const s = (m as { status: string } | null)?.status;
-    if (s === "apc_pending" || s === "accepted") {
-      await admin.from("manuscripts").update({ status: "copyediting" } as never).eq("id", mid);
-      await admin.from("workflow_events").insert({ manuscript_id: mid, from_status: s as never, to_status: "copyediting" as never, event_type: "payment_succeeded", description: "APC payment verified via Stripe webhook" } as never);
+  // Atomic, idempotent — single RPC fixes payments/invoices/apcs/manuscript/article/production + side-effects
+  const { error: rpcErr } = await admin.rpc("payment_succeeded" as never, {
+    p_invoice_id: invoiceId,
+    p_provider: "stripe",
+    p_provider_payment_id: sessionId,
+    p_provider_event_id: eventId,
+    p_amount: amount || null,
+    p_currency: currency || null,
+  } as never);
+  if (rpcErr) {
+    // Fallback to legacy sequential path if RPC not yet deployed
+    if (paymentId) {
+      await admin.from("payments").update({ status: "succeeded", paid_at: new Date().toISOString(), provider_event_id: eventId, amount: amount || undefined, currency: currency || undefined } as never).eq("id", paymentId);
+    } else {
+      await admin.from("payments").insert({ invoice_id: invoiceId, provider: "stripe", provider_payment_id: sessionId ?? `pi_${Date.now()}`, provider_event_id: eventId, amount: amount, currency, status: "succeeded", paid_at: new Date().toISOString() } as never);
     }
-    // Create the article + production record so it enters the production queue.
-    await ensureArticleInProduction(admin, mid);
-    await admin.from("apcs").update({ status: "paid", paid_at: new Date().toISOString() } as never).eq("id", inv.apc_id);
-    await admin.from("system_jobs").insert({ job_type: "payment_succeeded", entity_type: "manuscript", entity_id: mid, status: "completed", payload: { stripe_event: eventId, invoice_id: invoiceId } } as never);
-    const authorId2 = (m as { submitted_by: string | null } | null)?.submitted_by;
-    const jId2 = (m as { journal_id: string } | null)?.journal_id;
-    if (authorId2) {
-      await admin.from("notifications").insert({ user_id: authorId2, journal_id: jId2, manuscript_id: mid, type: "payment_received", title: "Payment received", message: "Your APC payment has been confirmed.", action_url: `/author/submissions/${mid}` } as never);
-      // Real email via Resend job
-      const { data: profile } = await admin.from("profiles").select("email, first_name, last_name").eq("id", authorId2).maybeSingle();
-      const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
-      if (p?.email) {
-        await enqueueEmailJob(admin as never, {
-          templateName: "payment_received",
-          recipientEmail: p.email,
-          recipientUserId: authorId2,
-          manuscriptId: mid,
-          context: { recipientName: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Author", manuscriptId: mid, amount: String(amount), currency },
-        });
-        await admin.from("email_logs").insert({ user_id: authorId2, manuscript_id: mid, recipient_email: p.email, template_name: "payment_received", subject: `Payment received — ${currency} ${amount}`, status: "queued" } as never);
+    await admin.from("invoices").update({ status: "paid", paid_at: new Date().toISOString() } as never).eq("id", invoiceId);
+    const { data: apc } = await admin.from("apcs").select("manuscript_id").eq("id", inv.apc_id).single();
+    const mid = (apc as { manuscript_id: string } | null)?.manuscript_id;
+    if (mid) {
+      const { data: m } = await admin.from("manuscripts").select("status, journal_id, submitted_by").eq("id", mid).single();
+      const s = (m as { status: string } | null)?.status;
+      if (s === "apc_pending" || s === "accepted") {
+        await admin.from("manuscripts").update({ status: "copyediting" } as never).eq("id", mid);
+        await admin.from("workflow_events").insert({ manuscript_id: mid, from_status: s as never, to_status: "copyediting" as never, event_type: "payment_succeeded", description: "APC payment verified via Stripe webhook" } as never);
       }
+      await ensureArticleInProduction(admin, mid);
+      await admin.from("apcs").update({ status: "paid", paid_at: new Date().toISOString() } as never).eq("id", inv.apc_id);
+      await admin.from("system_jobs").insert({ job_type: "payment_succeeded", entity_type: "manuscript", entity_id: mid, status: "completed", payload: { stripe_event: eventId, invoice_id: invoiceId } } as never);
+      const authorId2 = (m as { submitted_by: string | null } | null)?.submitted_by;
+      const jId2 = (m as { journal_id: string } | null)?.journal_id;
+      if (authorId2) {
+        await admin.from("notifications").insert({ user_id: authorId2, journal_id: jId2, manuscript_id: mid, type: "payment_received", title: "Payment received", message: "Your APC payment has been confirmed.", action_url: `/author/submissions/${mid}` } as never);
+        const { data: profile } = await admin.from("profiles").select("email, first_name, last_name").eq("id", authorId2).maybeSingle();
+        const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
+        if (p?.email) {
+          await enqueueEmailJob(admin as never, {
+            templateName: "payment_received",
+            recipientEmail: p.email,
+            recipientUserId: authorId2,
+            manuscriptId: mid,
+            context: { recipientName: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Author", manuscriptId: mid, amount: String(amount), currency },
+          });
+          await admin.from("email_logs").insert({ user_id: authorId2, manuscript_id: mid, recipient_email: p.email, template_name: "payment_received", subject: `Payment received — ${currency} ${amount}`, status: "queued" } as never);
+        }
+      }
+      await admin.from("audit_logs").insert({ action: "payment.succeeded", entity_type: "invoice", entity_id: invoiceId, new_data: { stripeEvent: eventId } } as never);
     }
-    await admin.from("audit_logs").insert({ action: "payment.succeeded", entity_type: "invoice", entity_id: invoiceId, new_data: { stripeEvent: eventId } } as never);
+    void processPendingEmails(admin).catch((e) => {
+      console.error("[payments] email worker drain failed:", e);
+    });
+    return NextResponse.json({ received: true, fallback: true });
   }
-
-  // Fire-and-forget: send payment-received emails immediately.
   void processPendingEmails(admin).catch((e) => {
     console.error("[payments] email worker drain failed:", e);
   });
-
   return NextResponse.json({ received: true });
 }

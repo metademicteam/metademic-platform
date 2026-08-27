@@ -100,6 +100,17 @@ export default async function AuthorDashboardPage({
   const totalCount = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
+  // Server-side auto-heal: reconcile any Stripe-paid but DB-pending APCs for this user before rendering
+  // (makes apc_pending -> copyediting automatic on next page load, even if webhook was missed)
+  try {
+    if (process.env.STRIPE_SECRET_KEY) {
+      const { reconcileInvoicesForManuscripts } = await import("@/lib/payments/reconcile");
+      const { data: ids } = await supabase.from("manuscripts").select("id").eq("submitted_by", user.id).in("status", ["accepted", "apc_pending"] as never).limit(20);
+      const mids = ((ids ?? []) as Array<{ id: string }>).map((r) => r.id);
+      if (mids.length) await reconcileInvoicesForManuscripts(mids);
+    }
+  } catch {}
+
   let apcCount = apcPending;
   const payableByManuscript = new Map<string, { amount: number; currency: string; status: string }>();
   try {

@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { reconcileInvoicesForManuscripts, reconcileInvoiceWithStripe } from "@/lib/payments/reconcile";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const admin = createAdminClient();
   const { data: invoice } = await admin.from("invoices").select("*").eq("id", id).single();
   if (!invoice) notFound();
-  const inv = invoice as { id: string; invoice_number: string; apc_id: string; amount: number; currency: string; status: string; billing_name: string | null; billing_email: string | null; billing_address: string | null; issued_at: string | null; due_at: string | null; paid_at: string | null };
+  // Auto-heal: if Stripe session is paid but DB still shows pending, reconcile server-side before render
+  let invoiceFinal: typeof invoice = invoice;
+  try {
+    const _invStatus = (invoice as { status: string }).status;
+    if (_invStatus !== "paid" && process.env.STRIPE_SECRET_KEY) {
+      const r = await reconcileInvoiceWithStripe((invoice as { id: string }).id);
+      if (r.reconciled) {
+        const { data: healed } = await admin.from("invoices").select("*").eq("id", id).single();
+        if (healed) invoiceFinal = healed as typeof invoice;
+      }
+    }
+  } catch {}
+  const inv = invoiceFinal as { id: string; invoice_number: string; apc_id: string; amount: number; currency: string; status: string; billing_name: string | null; billing_email: string | null; billing_address: string | null; issued_at: string | null; due_at: string | null; paid_at: string | null };
   const { data: apc } = await admin.from("apcs").select("id, manuscript_id, base_amount, discount_amount, waiver_amount, tax_amount, total_amount, currency, status").eq("id", inv.apc_id).single();
   const { data: manuscript } = apc ? await admin.from("manuscripts").select("id, manuscript_number, title, status, journal_id").eq("id", (apc as { manuscript_id: string }).manuscript_id).single() : { data: null };
   const { data: payments } = await admin.from("payments").select("*").eq("invoice_id", id).order("created_at", { ascending: false });
