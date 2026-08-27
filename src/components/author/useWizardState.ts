@@ -3,6 +3,7 @@
 import * as React from "react";
 import { z } from "zod";
 import type { ManuscriptWizardInput } from "@/lib/validations/manuscript";
+import { TOTAL_STEPS } from "@/components/author/WizardStepper";
 
 const STORAGE_KEY = "metademic:wizard:draft";
 const AUTOSAVE_DEBOUNCE_MS = 1500;
@@ -60,7 +61,7 @@ export function useWizardState() {
       const stepRaw = window.localStorage.getItem("metademic:wizard:step");
       if (stepRaw) {
         const n = parseInt(stepRaw, 10);
-        if (n >= 1 && n <= 12) setCurrentStep(n);
+        if (n >= 1 && n <= TOTAL_STEPS) setCurrentStep(n);
       }
     } catch {}
     setInitialized(true);
@@ -174,7 +175,7 @@ export function useWizardState() {
 
   const goToStep = React.useCallback(
     (step: number) => {
-      if (step < 1 || step > 12) return;
+      if (step < 1 || step > TOTAL_STEPS) return;
       setCurrentStep(step);
       if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     },
@@ -182,7 +183,7 @@ export function useWizardState() {
   );
 
   const nextStep = React.useCallback(() => {
-    setCurrentStep((s) => Math.min(12, s + 1));
+    setCurrentStep((s) => Math.min(TOTAL_STEPS, s + 1));
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
@@ -239,11 +240,10 @@ export const stepSchemas: Record<number, z.ZodTypeAny | null> = {
   4: z.object({
     authors: z.array(z.any()).min(1),
   }),
-  5: null, // affiliations optional
-  6: z.object({
+  5: z.object({
     keywords: z.array(z.string()).min(1).max(10),
   }),
-  7: z.object({
+  6: z.object({
     declarations: z.object({
       originalityConfirmed: z.literal(true),
       ethicsConfirmed: z.literal(true),
@@ -251,13 +251,13 @@ export const stepSchemas: Record<number, z.ZodTypeAny | null> = {
       copyrightConfirmed: z.literal(true),
     }),
   }),
+  7: null,
   8: null,
-  9: null,
-  10: z.object({
+  9: z.object({
     files: z.array(z.any()).min(1, "At least one manuscript file is required."),
   }),
+  10: null,
   11: null,
-  12: null,
 };
 
 export function validateStep(step: number, data: WizardData): { ok: boolean; errors?: string[] } {

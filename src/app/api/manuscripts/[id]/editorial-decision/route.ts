@@ -46,6 +46,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!manuscript) return NextResponse.json({ error: "Manuscript not found" }, { status: 404 });
   const m = manuscript as { id: string; journal_id: string; status: string; current_review_round: number; title: string; manuscript_number: string };
 
+  // Guard: once the APC is paid (or the manuscript is in production), it can no
+  // longer be sent back to peer review or rejected. This prevents an accidental
+  // decision from pulling a paid manuscript out of the production pipeline.
+  const isProductionPhase = ["copyediting", "typesetting", "author_proof", "production_approval", "ready_to_publish", "published"].includes(m.status);
+  const revertDecisions = new Set(["minor_revision", "major_revision", "reject", "desk_reject", "withdrawn"]);
+  if (isProductionPhase || revertDecisions.has(parsed.data.decision)) {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const admin = createAdminClient();
+    const { data: apc } = await admin.from("apcs").select("status").eq("manuscript_id", id).maybeSingle();
+    const apcPaid = (apc as { status: string } | null)?.status === "paid";
+    if (apcPaid || isProductionPhase) {
+      return NextResponse.json({ error: "APC already paid / manuscript is in production. It cannot be sent back to peer review or rejected. Use the production workflow or contact an administrator." }, { status: 409 });
+    }
+  }
+
   // Check editor permission
   const { data: membership } = await supabase.from("journal_members").select("role, is_active").eq("user_id", user.id).eq("journal_id", m.journal_id).eq("is_active", true);
   const hasEditor = (membership ?? []).some((r) => ["editor", "managing_editor", "editor_in_chief", "section_editor", "journal_manager", "journal_admin", "super_admin"].includes((r as { role: string }).role));

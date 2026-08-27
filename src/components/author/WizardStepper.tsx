@@ -7,16 +7,17 @@ export const WIZARD_STEPS = [
   { id: 1, label: "Journal", short: "Journal" },
   { id: 2, label: "Article Type", short: "Type" },
   { id: 3, label: "Title & Abstract", short: "Title" },
-  { id: 4, label: "Authors", short: "Authors" },
-  { id: 5, label: "Affiliations", short: "Affiliations" },
-  { id: 6, label: "Keywords", short: "Keywords" },
-  { id: 7, label: "Declarations", short: "Declarations" },
-  { id: 8, label: "Suggested Reviewers", short: "Suggested" },
-  { id: 9, label: "Excluded Reviewers", short: "Excluded" },
-  { id: 10, label: "Upload Files", short: "Files" },
-  { id: 11, label: "Review", short: "Review" },
-  { id: 12, label: "Submit", short: "Submit" },
+  { id: 4, label: "Authors & Affiliations", short: "Authors" },
+  { id: 5, label: "Keywords", short: "Keywords" },
+  { id: 6, label: "Declarations", short: "Declarations" },
+  { id: 7, label: "Suggested Reviewers", short: "Suggested" },
+  { id: 8, label: "Excluded Reviewers", short: "Excluded" },
+  { id: 9, label: "Upload Files", short: "Files" },
+  { id: 10, label: "Review", short: "Review" },
+  { id: 11, label: "Submit", short: "Submit" },
 ] as const;
+
+export const TOTAL_STEPS = WIZARD_STEPS.length;
 
 export function WizardStepper({
   currentStep,

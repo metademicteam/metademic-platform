@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
+import { enqueueEmailJob } from "@/lib/jobs";
 
 const createSchema = z.object({
   apcId: z.string().uuid(),
@@ -109,7 +110,21 @@ export async function POST(req: NextRequest) {
     await admin.from("audit_logs").insert({ actor_id: user.id, journal_id: m.journal_id, manuscript_id: a.manuscript_id, action: "invoice.issued", entity_type: "invoice", entity_id: (invoice as { id: string }).id, new_data: { invoiceNumber, amount: a.total_amount } } as never);
     if (m.submitted_by) {
       await admin.from("notifications").insert({ user_id: m.submitted_by, journal_id: m.journal_id, manuscript_id: a.manuscript_id, type: "invoice_issued", title: "Invoice issued", message: `Invoice ${invoiceNumber} for "${m.title}" has been issued.`, action_url: `/author/submissions/${a.manuscript_id}` } as never);
-      await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: a.manuscript_id, recipient_email: billingEmail ?? "author", template_name: "invoice_issued", subject: `Invoice ${invoiceNumber} — Metademic`, status: "queued", metadata: { invoice_id: (invoice as { id: string }).id } } as never);
+      // Real email via Resend job — resolve the author's actual email
+      const { data: profile } = await admin.from("profiles").select("email, first_name, last_name").eq("id", m.submitted_by).maybeSingle();
+      const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
+      const recipientEmail = p?.email ?? billingEmail;
+      if (recipientEmail) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+        await enqueueEmailJob(admin as never, {
+          templateName: "invoice_issued",
+          recipientEmail,
+          recipientUserId: m.submitted_by,
+          manuscriptId: a.manuscript_id,
+          context: { recipientName: [p?.first_name, p?.last_name].filter(Boolean).join(" ") || "Author", journalName: (m as { journal_name?: string }).journal_name ?? "", manuscriptTitle: m.title, manuscriptNumber: (m as { manuscript_number?: string }).manuscript_number ?? "", amount: String(a.total_amount), currency: a.currency, invoiceNumber, actionUrl: `${appUrl}/finance/invoices/${(invoice as { id: string }).id}` },
+        });
+        await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: a.manuscript_id, recipient_email: recipientEmail, template_name: "invoice_issued", subject: `Invoice ${invoiceNumber} — Metademic`, status: "queued", metadata: { invoice_id: (invoice as { id: string }).id } } as never);
+      }
     }
     await admin.from("system_jobs").insert({ job_type: "invoice_issued", entity_type: "invoice", entity_id: (invoice as { id: string }).id, status: "completed", payload: { invoice_number: invoiceNumber } } as never);
   }

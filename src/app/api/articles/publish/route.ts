@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { generateDoi, buildCrossrefMetadata, queueDoiRegistration, upsertDoiRecord, validateDoiPrefix } from "@/lib/services/doi-service";
+import { enqueueEmailJob } from "@/lib/jobs";
+import { processPendingEmails } from "@/lib/email/send";
 
 const schema = z.object({
   manuscriptId: z.string().uuid(),
@@ -229,11 +231,29 @@ export async function POST(req: NextRequest) {
   try {
     if (m.submitted_by) {
       await admin.from("notifications").insert({ user_id: m.submitted_by, journal_id: m.journal_id, manuscript_id: manuscriptId, type: "article_published", title: "Article published", message: `"${m.title}" has been published as ${slug}.`, action_url: `/articles/${slug}` } as never);
+      // Real email via Resend job
+      const { data: profile } = await admin.from("profiles").select("email, first_name, last_name").eq("id", m.submitted_by).maybeSingle();
+      const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
+      if (p?.email) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+        await enqueueEmailJob(admin as never, {
+          templateName: "article_published",
+          recipientEmail: p.email,
+          recipientUserId: m.submitted_by,
+          manuscriptId,
+          context: { recipientName: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Author", manuscriptTitle: m.title, articleTitle: m.title, doi: (doiInfo as { doi?: string } | null)?.doi ?? undefined, articleUrl: `${appUrl}/articles/${slug}` },
+        });
+        await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: manuscriptId, recipient_email: p.email, template_name: "article_published", subject: `Your article has been published — ${m.title}`, status: "queued" } as never);
+      }
     }
-    await admin.from("email_logs").insert({ user_id: m.submitted_by, manuscript_id: manuscriptId, recipient_email: "author", template_name: "article_published", subject: `Your article has been published — ${m.title}`, status: "queued" } as never);
     await admin.from("audit_logs").insert({ actor_id: user.id, journal_id: m.journal_id, manuscript_id: manuscriptId, action: "article.published", entity_type: "article", entity_id: articleId, new_data: { slug, articleNumber, publication_status: setReadyOnly ? "draft" : "published" } } as never);
     await admin.from("system_jobs").insert({ job_type: "article_published", entity_type: "article", entity_id: articleId, status: "completed", payload: { manuscript_id: manuscriptId, slug } } as never);
   } catch {}
+
+  // Fire-and-forget: send published emails immediately.
+  void processPendingEmails(admin).catch((e) => {
+    console.error("[publish] email worker drain failed:", e);
+  });
 
   const { data: finalArticle } = await admin.from("articles").select("*").eq("id", articleId).single();
   return NextResponse.json({ data: finalArticle, doi: doiInfo, message: setReadyOnly ? "Article created (draft/ready)" : "Article published" }, { status: existingArticle ? 200 : 201 });

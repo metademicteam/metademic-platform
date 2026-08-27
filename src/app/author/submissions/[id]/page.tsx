@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { MANUSCRIPT_STATUS_LABELS, MANUSCRIPT_STATUS_COLORS, type ManuscriptStatus } from "@/lib/constants";
 import { FileText, Clock, User, Building2, Tag, ShieldCheck, Star, Ban, Download, History, AlertCircle, ArrowLeft, Send, Undo2, Pencil } from "lucide-react";
 import { ClientActions } from "./ClientActions";
+import { PayApcButton } from "@/components/author/PayApcButton";
 
 function StatusBadge({ status }: { status: string }) {
   const s = status as ManuscriptStatus;
@@ -67,6 +68,14 @@ export default async function ManuscriptDetailPage({ params }: { params: Promise
     admin.from("workflow_events").select("*").eq("manuscript_id", id).order("created_at", { ascending: false }).limit(30),
     admin.from("apcs").select("*").eq("manuscript_id", id).maybeSingle(),
   ]);
+
+  // Look up the invoice for this manuscript's APC (for reference display).
+  let invoice: { id: string; invoice_number: string; status: string; amount: number; total_amount: number } | null = null;
+  if (apc) {
+    const invoiceId = (apc as { id: string }).id;
+    const { data } = await admin.from("invoices").select("id, invoice_number, status, amount, total_amount").eq("apc_id", invoiceId).limit(1).maybeSingle();
+    invoice = (data as { id: string; invoice_number: string; status: string; amount: number; total_amount: number } | null) ?? null;
+  }
 
   const canSubmit = m.status === "draft";
   const canWithdraw = ["draft", "submitted", "technical_check", "editor_assignment", "editorial_screening"].includes(m.status);
@@ -329,15 +338,22 @@ export default async function ManuscriptDetailPage({ params }: { params: Promise
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="apc">
             <CardHeader>
               <CardTitle className="text-sm">APC</CardTitle>
             </CardHeader>
-            <CardContent className="text-sm">
+            <CardContent className="space-y-2 text-sm">
               {(apc as Record<string, unknown> | null) ? (
                 <>
-                  <p>Status: {(apc as { status: string }).status}</p>
+                  <p>Status: <Badge variant={(apc as { status: string }).status === "paid" ? "default" : "secondary"} className="text-[11px]">{(apc as { status: string }).status}</Badge></p>
                   <p>Total: {(apc as { total_amount: number }).total_amount} {(apc as { currency: string }).currency}</p>
+                  {invoice && <p className="text-xs text-muted-foreground font-mono">Invoice: {(invoice as { invoice_number: string }).invoice_number}</p>}
+                  {(apc as { status: string }).status !== "paid" && (
+                    <PayApcButton manuscriptId={m.id} amount={Number((apc as { total_amount: number }).total_amount)} currency={(apc as { currency: string }).currency} />
+                  )}
+                  {(apc as { status: string }).status === "paid" && (
+                    <p className="text-emerald-600 text-xs">✓ APC paid</p>
+                  )}
                 </>
               ) : (
                 <p className="text-muted-foreground">No APC record (not yet accepted).</p>

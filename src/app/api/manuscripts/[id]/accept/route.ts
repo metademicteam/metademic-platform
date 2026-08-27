@@ -4,6 +4,7 @@ import { z } from "zod";
 import { calculateApc } from "@/lib/services/apc-service";
 import { writeAuditLog } from "@/lib/audit";
 import { enqueueJob, enqueueEmailJob, enqueueAcceptanceLetter } from "@/lib/jobs";
+import { processPendingEmails } from "@/lib/email/send";
 
 const schema = z.object({
   editorReason: z.string().max(5000).optional(),
@@ -220,6 +221,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (e) {
     console.error("[accept] notification/email failed:", e);
   }
+
+  // Fire-and-forget: drain the queued email jobs so the author gets the
+  // acceptance email immediately. Best-effort; failures are logged by the worker.
+  void processPendingEmails(supabase as never).catch((e) => {
+    console.error("[accept] email worker drain failed:", e);
+  });
 
   // 6) Workflow event + audit
   await supabase.from("workflow_events").insert({

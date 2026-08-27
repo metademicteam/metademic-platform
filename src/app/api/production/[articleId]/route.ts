@@ -117,7 +117,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ar
       published: "published",
     };
     const ms = manuscriptStatusMap[targetStatus] as never;
-    if (ms) await admin.from("manuscripts").update({ status: ms } as never).eq("id", mId);
+        if (ms) await admin.from("manuscripts").update({ status: ms } as never).eq("id", mId);
+    if (targetStatus === "published") {
+      await admin.from("articles").update({ publication_status: "published" as never, published_at: new Date().toISOString(), updated_at: new Date().toISOString() } as never).eq("id", articleId);
+    }
     await admin.from("workflow_events").insert({ manuscript_id: mId, from_status: current as never, to_status: manuscriptStatusMap[targetStatus] as never, event_type: "production_status", description: `Production ${current} → ${targetStatus}` } as never);
     await admin.from("audit_logs").insert({ actor_id: user.id, journal_id: (articleRow as { journal_id: string }).journal_id, manuscript_id: mId, action: "production.status_changed", entity_type: "production_record", entity_id: (record as { id: string }).id, new_data: { from: current, to: targetStatus } } as never);
     if (targetStatus === "proof_ready" || targetStatus === "author_review") {

@@ -101,15 +101,21 @@ export default async function AuthorDashboardPage({
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   let apcCount = apcPending;
+  const payableByManuscript = new Map<string, { amount: number; currency: string; status: string }>();
   try {
     const { createAdminClient } = await import("@/lib/supabase/admin");
     const admin = createAdminClient();
     const { data: apcRows } = await admin
       .from("apcs")
-      .select("id, manuscript_id, status, manuscripts!inner(submitted_by)")
+      .select("id, manuscript_id, status, total_amount, currency, manuscripts!inner(submitted_by)")
       .eq("manuscripts.submitted_by", user.id)
       .in("status", ["calculated", "invoice_issued", "payment_pending"] as never);
-    if (apcRows) apcCount = (apcRows as unknown[]).length;
+    if (apcRows) {
+      apcCount = (apcRows as unknown[]).length;
+      for (const row of apcRows as Array<{ manuscript_id: string; status: string; total_amount: number; currency: string }>) {
+        payableByManuscript.set(row.manuscript_id, { amount: Number(row.total_amount), currency: row.currency, status: row.status });
+      }
+    }
   } catch {}
 
   const statCards = [
@@ -324,9 +330,16 @@ export default async function AuthorDashboardPage({
                         </td>
                         <td className="px-3 py-2.5 text-[11px] text-[#64748b] whitespace-nowrap">{m.submitted_at ? new Date(m.submitted_at).getFullYear() : new Date(m.updated_at).getFullYear()}</td>
                         <td className="px-3 py-2.5">
-                          <Button asChild variant="outline" size="xs" className="h-6 rounded-[6px] border-[#e2e8f0] bg-white text-[11px] font-medium">
-                            <Link href={`/author/submissions/${m.id}`}>View</Link>
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <Button asChild variant="outline" size="xs" className="h-6 rounded-[6px] border-[#e2e8f0] bg-white text-[11px] font-medium">
+                              <Link href={`/author/submissions/${m.id}`}>View</Link>
+                            </Button>
+                            {payableByManuscript.has(m.id) && (
+                              <Button asChild size="xs" className="h-6 rounded-[6px] bg-[#1e4ed8] text-[11px] font-semibold">
+                                <Link href={`/author/submissions/${m.id}#apc`}>Pay APC</Link>
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -348,9 +361,16 @@ export default async function AuthorDashboardPage({
                     <p className="text-[11px] text-[#64748b]">
                       {m.journals?.name} · v{m.current_version} · {m.submitted_at ? new Date(m.submitted_at).toLocaleDateString() : "Draft"}
                     </p>
-                    <Button asChild variant="outline" size="sm" className="w-full rounded-[8px] border-[#e2e8f0]">
-                      <Link href={`/author/submissions/${m.id}`}>View details</Link>
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button asChild variant="outline" size="sm" className="flex-1 rounded-[8px] border-[#e2e8f0]">
+                        <Link href={`/author/submissions/${m.id}`}>View details</Link>
+                      </Button>
+                      {payableByManuscript.has(m.id) && (
+                        <Button asChild size="sm" className="flex-1 rounded-[8px] bg-[#1e4ed8]">
+                          <Link href={`/author/submissions/${m.id}#apc`}>Pay APC</Link>
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

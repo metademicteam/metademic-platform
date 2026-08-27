@@ -58,8 +58,21 @@ export default async function ReviewPortalPage({ params }: { params: Promise<{ i
   }
 
   // Files: respect blind — reviewer can download but filenames should not leak author names if double_blind? For simplicity, allow file download but don't expose author metadata
-  const { data: fileRows } = await admin.from("manuscript_files").select("id, original_filename, file_type, secure_url, storage_path").eq("manuscript_id", manuscriptId).eq("file_type", "manuscript").order("created_at", { ascending: false }).limit(5);
-  files = (fileRows ?? []) as Array<{ id: string; original_filename: string; file_type: string; secure_url: string | null; storage_path: string | null }>;
+  // NOTE: `secure_url` is NOT a real column — it lives inside the `metadata` jsonb. Selecting it causes
+  // PostgREST to error the whole query and return 0 rows. Only select real columns + metadata.
+  const { data: fileRows } = await admin.from("manuscript_files").select("id, original_filename, file_type, storage_path, metadata").eq("manuscript_id", manuscriptId).eq("file_type", "manuscript").order("created_at", { ascending: false }).limit(5);
+  files = (fileRows ?? []).map((f) => {
+    const r = f as Record<string, unknown>;
+    const meta = (r.metadata ?? {}) as { secure_url?: string; cloudinary?: { secure_url?: string } };
+    return {
+      id: r.id as string,
+      original_filename: r.original_filename as string,
+      file_type: r.file_type as string,
+      // secure_url lives in metadata (Cloudinary), not as a top-level column.
+      secure_url: meta.secure_url ?? meta.cloudinary?.secure_url ?? null,
+      storage_path: r.storage_path as string | null,
+    };
+  });
 
   // Fetch manuscript versions for content placeholder
   const { data: versions } = await admin.from("manuscript_versions").select("version_number").eq("manuscript_id", manuscriptId).order("version_number", { ascending: false }).limit(1);
@@ -105,7 +118,7 @@ export default async function ReviewPortalPage({ params }: { params: Promise<{ i
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground mt-2">In-browser viewer placeholder — PDF rendering would appear in the Review Form below.</p>
+            <p className="text-xs text-muted-foreground mt-2">The manuscript is rendered in the PDF viewer below.</p>
           </CardContent>
         </Card>
       )}
@@ -114,6 +127,7 @@ export default async function ReviewPortalPage({ params }: { params: Promise<{ i
         assignmentId={assignmentId}
         manuscriptTitle={manuscriptTitle}
         manuscriptAbstract={manuscriptAbstract}
+        manuscriptPdfUrl={files?.[0]?.secure_url ?? null}
         blindType={blindType}
         alreadySubmitted={isCompleted}
         initialData={

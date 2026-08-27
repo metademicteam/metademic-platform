@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
+import { enqueueEmailJob } from "@/lib/jobs";
+import { processPendingEmails } from "@/lib/email/send";
 
 const inviteSchema = z.object({
   reviewerProfileId: z.string().uuid(),
@@ -127,6 +129,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     action_url: `/reviewer/invitations`,
     metadata: { review_round_id: roundId, deadline_at: deadlineAt } as never,
   } as never);
+
+  // Email the reviewer (async job → Resend) and record the log row.
+  try {
+    const { data: profile } = await supabase.from("profiles").select("email, first_name, last_name").eq("id", rp.user_id).maybeSingle();
+    const p = profile as { email: string | null; first_name: string | null; last_name: string | null } | null;
+    const recipientEmail = p?.email;
+    const recipientName = [p?.first_name, p?.last_name].filter(Boolean).join(" ") || "Colleague";
+    const { data: journalRow } = await supabase.from("journals").select("name").eq("id", m.journal_id).single();
+    const journalName = (journalRow as { name: string } | null)?.name ?? "the journal";
+    if (recipientEmail) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+      await enqueueEmailJob(supabase as never, {
+        templateName: "reviewer_invited",
+        recipientEmail,
+        recipientUserId: rp.user_id,
+        manuscriptId: id,
+        context: {
+          recipientName,
+          journalName,
+          manuscriptNumber: (m as { manuscript_number?: string }).manuscript_number ?? "",
+          manuscriptTitle: m.title,
+          deadlineAt: new Date(deadlineAt).toLocaleDateString(),
+          actionUrl: `${appUrl}/reviewer/invitations`,
+        },
+      });
+      await supabase.from("email_logs").insert({
+        user_id: rp.user_id,
+        manuscript_id: id,
+        recipient_email: recipientEmail,
+        template_name: "reviewer_invited",
+        subject: `Invitation to review — ${m.title}`,
+        status: "queued",
+      } as never);
+    }
+  } catch (e) {
+    console.error("[reviewers] email enqueue failed:", e);
+  }
+
+  // Fire-and-forget: send the reviewer invitation email immediately.
+  void processPendingEmails(supabase as never).catch((e) => {
+    console.error("[reviewers] email worker drain failed:", e);
+  });
 
   return NextResponse.json({ data: { invitationId, assignmentId: (assignment as { id: string }).id, roundId, deadlineAt } }, { status: 201 });
 }

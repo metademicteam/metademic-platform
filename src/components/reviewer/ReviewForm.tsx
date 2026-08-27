@@ -25,6 +25,7 @@ export function ReviewForm({
   manuscriptTitle,
   manuscriptAbstract,
   manuscriptContent,
+  manuscriptPdfUrl,
   blindType,
   alreadySubmitted,
   initialData,
@@ -33,6 +34,7 @@ export function ReviewForm({
   manuscriptTitle: string;
   manuscriptAbstract?: string | null;
   manuscriptContent?: string | null;
+  manuscriptPdfUrl?: string | null;
   blindType?: string;
   alreadySubmitted?: boolean;
   initialData?: Partial<Record<(typeof SCORE_FIELDS)[number]["key"] | "comments_to_author" | "confidential_comments_to_editor" | "recommendation", unknown>>;
@@ -49,6 +51,7 @@ export function ReviewForm({
   const [annotations, setAnnotations] = React.useState<Array<{ selectedText: string; comment: string }>>([]);
   const [pendingSelection, setPendingSelection] = React.useState<string>("");
   const [pendingComment, setPendingComment] = React.useState("");
+  const [view, setView] = React.useState<"pdf" | "text">(manuscriptPdfUrl ? "pdf" : "text");
   const [loading, setLoading] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
@@ -116,9 +119,36 @@ export function ReviewForm({
             <h3 className="font-semibold text-sm">{manuscriptTitle}</h3>
             {manuscriptAbstract && <p className="text-sm text-muted-foreground mt-2">{manuscriptAbstract}</p>}
           </div>
-          <div onMouseUp={handleTextSelect} className="rounded-md border bg-muted/20 p-4 text-sm leading-relaxed min-h-[140px] select-text">
-            {manuscriptContent ? <p>{manuscriptContent}</p> : <p className="text-muted-foreground italic">In-browser viewer placeholder — full manuscript PDF/HTML would render here. Select any text to create an inline annotation.</p>}
-          </div>
+
+          {/* View toggle: PDF viewer vs text (select-to-annotate) */}
+          {manuscriptPdfUrl && (
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant={view === "pdf" ? "default" : "outline"} onClick={() => setView("pdf")}>
+                PDF
+              </Button>
+              <Button type="button" size="sm" variant={view === "text" ? "default" : "outline"} onClick={() => setView("text")}>
+                Text (annotate)
+              </Button>
+              <Button type="button" size="sm" variant="outline" asChild>
+                <a href={manuscriptPdfUrl} target="_blank" rel="noopener noreferrer">
+                  Open PDF
+                </a>
+              </Button>
+            </div>
+          )}
+
+          {view === "pdf" && manuscriptPdfUrl ? (
+            <iframe
+              src={manuscriptPdfUrl}
+              title="Manuscript PDF"
+              className="w-full rounded-md border bg-white"
+              style={{ height: "70vh", minHeight: 480 }}
+            />
+          ) : (
+            <div onMouseUp={handleTextSelect} className="rounded-md border bg-muted/20 p-4 text-sm leading-relaxed min-h-[140px] select-text">
+              {manuscriptContent ? <p>{manuscriptContent}</p> : <p className="text-muted-foreground italic">Select any text from the PDF (or use the Text view) to create an inline annotation.</p>}
+            </div>
+          )}
 
           {/* Inline annotation capture */}
           <div className="rounded-md border p-3 space-y-2">

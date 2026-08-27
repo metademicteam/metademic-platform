@@ -12,10 +12,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
-import { WizardStepper } from "@/components/author/WizardStepper";
+import { WizardStepper, TOTAL_STEPS } from "@/components/author/WizardStepper";
 import { WizardNav } from "@/components/author/WizardNav";
 import { useWizardState, validateStep } from "@/components/author/useWizardState";
 import { ManuscriptUpload, type UploadedFile } from "@/components/author/ManuscriptUpload";
+import { KeywordSuggestions } from "@/components/author/KeywordSuggestions";
+import { CountryInput } from "@/components/author/CountryInput";
 import { ARTICLE_TYPES, ARTICLE_TYPE_LABELS } from "@/lib/constants";
 import {
   Plus,
@@ -182,7 +184,7 @@ export default function NewSubmissionWizardPage() {
       return;
     }
     markStepCompleted(currentStep);
-    if (currentStep === 12) {
+    if (currentStep === TOTAL_STEPS) {
       void handleSubmit();
     } else {
       nextStep();
@@ -191,7 +193,7 @@ export default function NewSubmissionWizardPage() {
 
   async function handleSubmit() {
     // Final validation: ensure all required steps
-    const requiredSteps = [1, 2, 3, 4, 6, 7, 10];
+    const requiredSteps = [1, 2, 3, 4, 5, 6, 9];
     for (const s of requiredSteps) {
       const v = validateStep(s, data);
       if (!v.ok) {
@@ -346,17 +348,7 @@ export default function NewSubmissionWizardPage() {
             </div>
             <div className="space-y-2">
               <Label>Subject Areas * (comma-separated, 1–10)</Label>
-              <Input
-                placeholder="e.g. Machine Learning, Bioinformatics"
-                value={(data.subjectAreas ?? []).join(", ")}
-                onChange={(e) => {
-                  const arr = e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  updateData({ subjectAreas: arr });
-                }}
-              />
+              <SubjectAreasInput value={data.subjectAreas ?? []} onChange={(arr) => updateData({ subjectAreas: arr })} />
               <p className="text-xs text-muted-foreground">{(data.subjectAreas ?? []).length} subject area(s)</p>
             </div>
           </div>
@@ -388,16 +380,14 @@ export default function NewSubmissionWizardPage() {
       case 4:
         return <AuthorsStep data={data} updateData={updateData} />;
       case 5:
-        return <AffiliationsStep data={data} updateData={updateData} />;
-      case 6:
         return <KeywordsStep data={data} updateData={updateData} />;
-      case 7:
+      case 6:
         return <DeclarationsStep data={data} updateData={updateData} />;
-      case 8:
+      case 7:
         return <SuggestedReviewersStep data={data} updateData={updateData} />;
-      case 9:
+      case 8:
         return <ExcludedReviewersStep data={data} updateData={updateData} />;
-      case 10:
+      case 9:
         return (
           <div className="space-y-4">
             <SectionHeader icon={FileText} title="Upload Files" description="Upload your manuscript and supplementary files. Stored in Cloudinary with versioned folders." />
@@ -425,9 +415,9 @@ export default function NewSubmissionWizardPage() {
             )}
           </div>
         );
-      case 11:
+      case 10:
         return <ReviewStep data={data} journals={journals} />;
-      case 12:
+      case 11:
         return (
           <div className="space-y-4">
             <SectionHeader icon={ShieldCheck} title="Submit Manuscript" description="Review the summary and confirm submission. This will transition draft → submitted." />
@@ -467,7 +457,7 @@ export default function NewSubmissionWizardPage() {
 
   const isNextDisabled = (() => {
     if (currentStep === 1 && !data.journalId) return true;
-    if (currentStep === 10 && (!data.files || (data.files as unknown[]).length === 0)) return false; // allow warning but not block
+    if (currentStep === 9 && (!data.files || (data.files as unknown[]).length === 0)) return false; // allow warning but not block
     return false;
   })();
 
@@ -476,7 +466,7 @@ export default function NewSubmissionWizardPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Submit a Manuscript</h1>
-          <p className="text-sm text-muted-foreground">12-step wizard • Autosaves to draft (localStorage + server) • Never lose data</p>
+          <p className="text-sm text-muted-foreground">{TOTAL_STEPS}-step wizard • Autosaves to draft (localStorage + server) • Never lose data</p>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
             {autosaveError ? (
               <span className="flex items-center gap-1 text-red-600">
@@ -521,13 +511,13 @@ export default function NewSubmissionWizardPage() {
         </CardContent>
         <WizardNav
           currentStep={currentStep}
-          totalSteps={12}
+          totalSteps={TOTAL_STEPS}
           onPrev={prevStep}
           onNext={handleNext}
           onSaveDraft={() => void saveDraftNow()}
           isSaving={isSaving || submitting}
           isNextDisabled={isNextDisabled || submitting}
-          nextLabel={currentStep === 12 ? (submitting ? "Submitting…" : "Submit manuscript") : undefined}
+          nextLabel={currentStep === TOTAL_STEPS ? (submitting ? "Submitting…" : "Submit manuscript") : undefined}
         />
       </Card>
 
@@ -540,6 +530,46 @@ export default function NewSubmissionWizardPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subject areas input (free-typing, normalized on blur)
+// ---------------------------------------------------------------------------
+
+function parseSubjectAreas(raw: string): string[] {
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function SubjectAreasInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [draft, setDraft] = React.useState<string>(() => value.join(", "));
+  const focused = React.useRef(false);
+  const serialized = value.join(", ");
+
+  // Sync from restored data only when the user is not actively typing.
+  React.useEffect(() => {
+    if (!focused.current) setDraft(serialized);
+  }, [serialized]);
+
+  return (
+    <Input
+      placeholder="e.g. Machine Learning, Bioinformatics"
+      value={focused.current ? draft : serialized}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => {
+        focused.current = true;
+        setDraft(e.target.value);
+        onChange(parseSubjectAreas(e.target.value));
+      }}
+      onBlur={() => {
+        focused.current = false;
+        const arr = parseSubjectAreas(draft);
+        setDraft(arr.join(", "));
+        onChange(arr);
+      }}
+    />
   );
 }
 
@@ -587,9 +617,21 @@ function AuthorsStep({ data, updateData }: { data: Record<string, unknown>; upda
     updateData({ authors: next });
   }
 
+  const affiliations = ((data.affiliations as Record<string, unknown>[]) ?? []) as Array<{ id: string; institution: string; department?: string; country?: string; rorId?: string }>;
+  function addAffiliation() {
+    updateData({ affiliations: [...affiliations, { id: Math.random().toString(36).slice(2, 8), institution: "", department: "", country: "", rorId: "" }] });
+  }
+  function updateAffiliation(idx: number, patch: Record<string, unknown>) {
+    const next = affiliations.map((a, i) => (i === idx ? { ...a, ...patch } : a));
+    updateData({ affiliations: next });
+  }
+  function removeAffiliation(idx: number) {
+    updateData({ affiliations: affiliations.filter((_, i) => i !== idx) });
+  }
+
   return (
     <div className="space-y-4">
-      <SectionHeader icon={Users} title="Authors" description="Add all authors in order. Mark corresponding author(s), add ORCID and institution." />
+      <SectionHeader icon={Users} title="Authors & Affiliations" description="Add all authors in order, then list institutional affiliations. Mark corresponding author(s), add ORCID and institution." />
       {authors.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
           <p className="text-sm text-muted-foreground">No authors yet.</p>
@@ -672,113 +714,72 @@ function AuthorsStep({ data, updateData }: { data: Record<string, unknown>; upda
           </Button>
         </div>
       )}
-    </div>
-  );
-}
 
-function AffiliationsStep({ data, updateData }: { data: Record<string, unknown>; updateData: (p: Record<string, unknown>) => void }) {
-  const affiliations = ((data.affiliations as Record<string, unknown>[]) ?? []) as Array<{ id: string; institution: string; department?: string; country?: string; rorId?: string }>;
-  function add() {
-    updateData({ affiliations: [...affiliations, { id: Math.random().toString(36).slice(2, 8), institution: "", department: "", country: "", rorId: "" }] });
-  }
-  function upd(idx: number, patch: Record<string, unknown>) {
-    const next = affiliations.map((a, i) => (i === idx ? { ...a, ...patch } : a));
-    updateData({ affiliations: next });
-  }
-  function remove(idx: number) {
-    updateData({ affiliations: affiliations.filter((_, i) => i !== idx) });
-  }
-  return (
-    <div className="space-y-4">
-      <SectionHeader icon={Building2} title="Affiliations" description="Add institutional affiliations referenced by authors." />
-      {affiliations.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No affiliations added. Authors can also set institution directly in the Authors step.</div>
-      ) : (
-        <div className="space-y-3">
-          {affiliations.map((aff, idx) => (
-            <Card key={aff.id}>
-              <CardContent className="p-4 grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2 flex justify-between items-center">
-                  <Label className="font-medium">Affiliation {idx + 1}</Label>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => remove(idx)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Institution *</Label>
-                  <Input value={aff.institution} onChange={(e) => upd(idx, { institution: e.target.value })} placeholder="University / Institute" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Department</Label>
-                  <Input value={aff.department ?? ""} onChange={(e) => upd(idx, { department: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Country</Label>
-                  <Input value={aff.country ?? ""} onChange={(e) => upd(idx, { country: e.target.value })} placeholder="US" />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>ROR ID</Label>
-                  <Input value={aff.rorId ?? ""} onChange={(e) => upd(idx, { rorId: e.target.value })} placeholder="https://ror.org/..." />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-      <Button onClick={add} variant="outline" className="w-full">
-        <Plus className="h-4 w-4" /> Add affiliation
-      </Button>
-      <p className="text-xs text-muted-foreground">These affiliations are informational; authors’ snapshots are stored from the Authors step.</p>
+      <div className="border-t pt-6 mt-6">
+        <SectionHeader icon={Building2} title="Affiliations" description="Add institutional affiliations referenced by authors." />
+        {affiliations.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No affiliations added. Authors can also set institution directly above.</div>
+        ) : (
+          <div className="space-y-3">
+            {affiliations.map((aff, idx) => (
+              <Card key={aff.id}>
+                <CardContent className="p-4 grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2 flex justify-between items-center">
+                    <Label className="font-medium">Affiliation {idx + 1}</Label>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeAffiliation(idx)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>Institution *</Label>
+                    <Input value={aff.institution} onChange={(e) => updateAffiliation(idx, { institution: e.target.value })} placeholder="University / Institute" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Input value={aff.department ?? ""} onChange={(e) => updateAffiliation(idx, { department: e.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Country</Label>
+                    <CountryInput value={aff.country ?? ""} onChange={(v) => updateAffiliation(idx, { country: v })} placeholder="Search country…" />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>ROR ID</Label>
+                    <Input value={aff.rorId ?? ""} onChange={(e) => updateAffiliation(idx, { rorId: e.target.value })} placeholder="https://ror.org/..." />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+        <Button onClick={addAffiliation} variant="outline" className="w-full">
+          <Plus className="h-4 w-4" /> Add affiliation
+        </Button>
+      </div>
     </div>
   );
 }
 
 function KeywordsStep({ data, updateData }: { data: Record<string, unknown>; updateData: (p: Record<string, unknown>) => void }) {
   const keywords = (data.keywords as string[]) ?? [];
-  const [input, setInput] = React.useState("");
   function addKeyword(v: string) {
     const val = v.trim();
     if (!val || keywords.includes(val)) return;
     if (keywords.length >= 10) return;
     updateData({ keywords: [...keywords, val] });
-    setInput("");
   }
   function removeKeyword(idx: number) {
     updateData({ keywords: keywords.filter((_, i) => i !== idx) });
   }
   return (
     <div className="space-y-4">
-      <SectionHeader icon={Tag} title="Keywords" description="Add 1–10 keywords (press Enter to add). Duplicates not allowed." />
-      <div className="flex gap-2">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addKeyword(input);
-            }
-          }}
-          placeholder="Type keyword and press Enter"
-        />
-        <Button onClick={() => addKeyword(input)} variant="secondary">
-          Add
-        </Button>
-      </div>
-      {keywords.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {keywords.map((k, idx) => (
-            <Badge key={k + idx} variant="secondary" className="gap-1 pr-1">
-              {k}
-              <button onClick={() => removeKeyword(idx)} className="ml-1 rounded-full hover:bg-muted p-0.5">
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">No keywords yet.</p>
-      )}
+      <SectionHeader icon={Tag} title="Keywords" description="Add 1–10 keywords (press Enter to add). Duplicates not allowed. Search below for suggestions." />
+      <KeywordSuggestions
+        keywords={keywords}
+        onAdd={addKeyword}
+        onRemove={removeKeyword}
+        title={(data.title as string) ?? ""}
+        abstract={(data.abstract as string) ?? ""}
+      />
       <p className="text-xs text-muted-foreground">{keywords.length} / 10 keywords</p>
     </div>
   );
