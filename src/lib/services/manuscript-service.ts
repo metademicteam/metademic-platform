@@ -94,6 +94,22 @@ async function writeWorkflowEvent(
  * Create a draft manuscript for the authenticated user.
  * Generates manuscript_number via DB sequence if not provided.
  */
+async function ensureProfileExists(supabase: SupabaseClient, actorId: string): Promise<void> {
+  const { data: profile } = await supabase.from("profiles").select("id").eq("id", actorId).maybeSingle();
+  if (profile) return;
+  try {
+    const admin = createAdminClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const email = (user as { email?: string } | null)?.email ?? null;
+    // Insert minimal profile so FK passes; RLS insert policy allows id=auth.uid()
+    const { error } = await admin.from("profiles").insert({ id: actorId, email, status: "active" } as never);
+    if (error) {
+      // fallback to anon insert (in case service_role not configured)
+      await supabase.from("profiles").insert({ id: actorId, email, status: "active" } as never);
+    }
+  } catch {}
+}
+
 export async function createManuscript(
   supabase: SupabaseClient,
   actorId: string,
@@ -104,6 +120,8 @@ export async function createManuscript(
     throw new ManuscriptServiceError(parsed.error.errors[0]?.message ?? "Validation failed", "VALIDATION_ERROR");
   }
   const data = parsed.data;
+
+  await ensureProfileExists(supabase, actorId);
 
   // Generate manuscript number server-side.
   // Prefer the DB RPC; fall back to a local generation if the RPC is
